@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
+#include <cstring>
 
 #include "blendgram.h"
 
@@ -121,6 +122,17 @@ void BlendGramAlpha3(unsigned char *Src,unsigned char* Mask, unsigned char *Dest
 
 void BlendGramAlpha(unsigned char *Src,unsigned char* Mask, unsigned char *Dest, int Width, int Height)
 {
+
+    //memcpy(Dest, Src, Width * Height * 3 * sizeof(unsigned char));
+/*    for (int channel = 0; channel < 3; channel++) {
+        for (int row = 0; row < Height; row++) {
+            for (int col = 0; col < Width; col++) {
+                *(Dest + row * Width * 3 + col * 3 + channel) = *(Src + channel * Width * Height + row * Width + col);
+                //*(Dest + channel * Width * Height + row * Width + col)=*(Src + row * Width * 3 + col * 3 + channel);
+
+            }
+        }
+    }*/
 	unsigned char *LinePS, *LinePD,*LinePM;
 	for (int Y = 0; Y < Height; Y += 1)
 	{
@@ -129,21 +141,30 @@ void BlendGramAlpha(unsigned char *Src,unsigned char* Mask, unsigned char *Dest,
 		LinePD = Dest + Y * Width * 3;
 		for (int X = 0; X < Width; X += 1)
 		{
-			//func(LinePD,LinePS,LinePM);
             ColorBlend_Alpha(LinePD,LinePD,LinePS,*LinePM);
-            /*
-            float alpha = *LinePM/255.0f;
-            float beta = 1.0f-alpha;
-            //printf("==alpha %f beta %f\n",alpha,beta);
-            LinePD[0] = LinePD[0]*alpha+LinePS[0]*beta;
-            LinePD[1] = LinePD[1]*alpha+LinePS[1]*beta;
-            LinePD[2] = LinePD[2]*alpha+LinePS[2]*beta;
-            */
 			LinePS += 3;
 			LinePM += 1;
 			LinePD += 3;
 		}
 	}
+
+    /*for (int Y = 0; Y < Height; ++Y)
+    {
+        LinePS = Src + Y * Width * 3;
+        LinePD = Dest + Y * Width  * 3;
+
+        for (int X = 0; X < Width; ++X)
+        {
+            // 直接复制三个颜色通道的数据
+            LinePD[0] = LinePS[0];
+            LinePD[1] = LinePS[1];
+            LinePD[2] = LinePS[2];
+
+            // 更新指针到下一个像素
+            LinePS += 3;
+            LinePD += 3;
+        }
+    }*/
 }
 
 void BlendGramAlphaRev(unsigned char *Src,unsigned char* Mask, unsigned char *Dest, int Width, int Height)

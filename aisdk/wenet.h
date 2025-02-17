@@ -12,9 +12,9 @@ class Wenet{
     public:
         int calcmfcc(JMat* mwav,JMat* mmel);
         int calcmfcc(float* fwav,float* mel2);
-        int calcbnf(float* melbin,int melnum,float* bnfbin,int bnfnum);
+        int calcbnf(JMat* feat_mat, int n_feat, MBnfCache* bnf_cache);
         //int nextwav(const char* wavfile,JMat** pmat);
-        int nextwav(const char* wavfile,MBnfCache* bnfcache,float duration);
+        int nextwav(const char* wavfile,MBnfCache* bnfcache);
         float* nextbnf(JMat* bnfmat,int index);
         Wenet(const char* modeldir,const char* modelid);
         Wenet(const char* modelfn);

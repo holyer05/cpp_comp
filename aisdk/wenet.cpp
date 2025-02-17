@@ -17,32 +17,155 @@ void Wenet::initModel(const char* modelfn){
     //m_model->pushName("encoder_out",0);
 }
 
-int Wenet::calcbnf(float* melbin,int melnum,float* bnfbin,int bnfnum){
-    int rst = 0;
-    int chkmfcc = melnum;
-    int chkbnf = bnfnum;
-    auto onecfg = m_model->config();
-    auto cfg = &onecfg;
-    //cfg->dump();
-    cfg->shape_inputs[0][0] = 1;
-    cfg->shape_inputs[0][1] = chkmfcc;
-    cfg->size_inputs[0] = chkmfcc*MFCC_MELCHUNK;
-    cfg->shape_inputs[1][0] = 1;
-    cfg->size_inputs[1] = 1;
+int Wenet::calcbnf(JMat* feat_mat, int n_feat, MBnfCache* bnf_cache) {
+    // ======== dump fbank ========
+/*    std::ofstream fbank_csv("/data/data/ai.guiji.duix.test/fbank.csv");
+    fbank_csv << std::fixed << std::setprecision(6);
+    for (size_t i = 0; i < n_feat; i++) {
+        for (size_t j = 0; j < 80; j++) {
+            if (j > 0) {
+                fbank_csv << ",";
+            }
+            fbank_csv << feat_mat->fdata()[i*80+j];
+        }
+        fbank_csv << std::endl;
+    }*/
+    // ============================
 
-    cfg->shape_outputs[0][0] = 1;
-    cfg->shape_outputs[0][1] = chkbnf;
-    cfg->shape_outputs[0][2] = MFCC_BNFCHUNK;
-    cfg->size_outputs[0] = chkbnf*MFCC_BNFCHUNK;
-    cfg->dump();
-    void* arrin[] = { melbin,&chkmfcc,NULL };
-    void* arrout[] = { bnfbin,NULL };
-    const char* namein[] = {"speech","speech_lengths",NULL};
-    const char* nameout[] = {"encoder_out",NULL};
-    cfg->names_in = namein;
-    cfg->names_out = nameout;
-    rst = m_model->runModel(arrin,arrout,NULL,cfg);
-    return rst;
+    auto config = m_model->config();
+    // config.dump();
+
+    config.shape_inputs[0][0] = 1;
+    config.shape_inputs[0][1] = 1;
+    config.shape_inputs[0][2] = WENET_WINDOW_SIZE;
+    config.shape_inputs[0][3] = 80;
+    config.size_inputs[0] = (
+        config.shape_inputs[0][0]
+        * config.shape_inputs[0][1]
+        * config.shape_inputs[0][2]
+        * config.shape_inputs[0][3]
+    );
+    config.shape_inputs[1][0] = 1;
+    config.size_inputs[1] = 1;
+    config.shape_inputs[2][0] = 3;
+    config.shape_inputs[2][1] = 8;
+    config.shape_inputs[2][2] = 16;
+    config.shape_inputs[2][3] = 128;
+    config.size_inputs[2] = (
+        config.shape_inputs[2][0]
+        * config.shape_inputs[2][1]
+        * config.shape_inputs[2][2]
+        * config.shape_inputs[2][3]
+    );
+    config.shape_inputs[3][0] = 3;
+    config.shape_inputs[3][1] = 1;
+    config.shape_inputs[3][2] = 512;
+    config.shape_inputs[3][3] = 14;
+    config.size_inputs[3] = (
+        config.shape_inputs[3][0]
+        * config.shape_inputs[3][1]
+        * config.shape_inputs[3][2]
+        * config.shape_inputs[3][3]
+    );
+
+    config.shape_outputs[0][0] = 1;
+    config.shape_outputs[0][1] = MFCC_BNFBASE;
+    config.shape_outputs[0][2] = MFCC_BNFCHUNK;
+    config.size_outputs[0] = (
+        config.shape_outputs[0][0]
+        * config.shape_outputs[0][1]
+        * config.shape_outputs[0][2]
+    );
+
+    config.shape_outputs[1][0] = 3;
+    config.shape_outputs[1][1] = 8;
+    config.shape_outputs[1][2] = 16;
+    config.shape_outputs[1][3] = 128;
+    config.size_outputs[1] = (
+            config.shape_outputs[1][0]
+            * config.shape_outputs[1][1]
+            * config.shape_outputs[1][2]
+            * config.shape_outputs[1][3]
+    );
+    config.shape_outputs[2][0] = 3;
+    config.shape_outputs[2][1] = 1;
+    config.shape_outputs[2][2] = 512;
+    config.shape_outputs[2][3] = 14;
+    config.size_outputs[2] = (
+            config.shape_outputs[2][0]
+            * config.shape_outputs[2][1]
+            * config.shape_outputs[2][2]
+            * config.shape_outputs[2][3]
+    );
+
+
+    config.dump();
+
+    float* chunk = (float*)malloc(config.size_inputs[0] * sizeof(float));
+    int64_t offset = 100;
+    float* att_cache = (float*)malloc(config.size_inputs[2] * sizeof(float));
+    float* cnn_cache = (float*)malloc(config.size_inputs[3] * sizeof(float));
+    float* r_att_cache = (float*)malloc(config.size_outputs[1] * sizeof(float));
+    float* r_cnn_cache = (float*)malloc(config.size_outputs[2] * sizeof(float));
+    memset(att_cache, 0, config.size_inputs[2] * sizeof(float));
+    memset(cnn_cache, 0, config.size_inputs[3] * sizeof(float));
+
+    // -------- test data --------
+   // float chunk[1][1][67][80];
+    //int64_t offset[1] = {100};
+/*    float att_cache[3][8][16][128];
+    float cnn_cache[3][1][512][14];
+    float r_att_cache[3][8][16][128];
+    float r_cnn_cache[3][1][512][14];*/
+    //memset(chunk, 0, 1 * 1 * 67 * 80 * sizeof(float));
+    // ---------------------------
+
+
+    void* array_in[] = { chunk, &offset, att_cache, cnn_cache};
+    void* array_out[] = { nullptr,r_att_cache,r_cnn_cache};
+    const char* names_in[] = { "chunk", "offset", "att_cache", "cnn_cache",NULL};
+    const char* names_out[] = { "output","r_att_cache","r_cnn_cache",NULL};
+    config.names_in = names_in;
+    config.names_out = names_out;
+    //for (char** p = const_cast<char **>(names_in); *p != NULL; p++) config.name_inputs.push_back(*p);
+    //for (char** p = const_cast<char **>(names_out); *p != NULL; p++) config.name_outputs.push_back(*p);
+
+    for (int i = 0; i <= n_feat - WENET_WINDOW_SIZE; i += WENET_STRIDE) {
+        const float* feature_start = feat_mat->fdata() + i*80;
+        const int feature_length = std::min<int>(n_feat - i, WENET_WINDOW_SIZE);
+        memset(chunk, 0, config.size_inputs[0] * sizeof(float));
+        memcpy(chunk, feature_start, feature_length * 80* sizeof(float));
+        array_out[0] = bnf_cache->secBuf(i / WENET_STRIDE)->fdata();
+        int result = m_model->runModel(array_in, array_out, NULL, &config);
+        if (result != 0) {
+            return result;
+        }
+    }
+
+    free(chunk);
+    free(att_cache);
+    free(cnn_cache);
+    free(r_att_cache);
+    free(r_cnn_cache);
+
+    // ======== dump wenet ========
+/*    std::ofstream wenet_csv("/data/data/ai.guiji.duix.test/wenet.csv");
+    wenet_csv << std::fixed << std::setprecision(6);
+    for (int k = 0; k <= n_feat - WENET_WINDOW_SIZE; k += WENET_STRIDE) {
+        const auto mat = bnf_cache->secBuf(k / WENET_STRIDE);
+        for (size_t i = 0; i < MFCC_BNFBASE; i++) {
+            for (size_t j = 0; j < MFCC_BNFCHUNK; j++) {
+                if (j > 0) {
+                    wenet_csv << ",";
+                }
+                wenet_csv << *mat->fitem(i, j);
+            }
+            wenet_csv << std::endl;
+        }
+    }*/
+    // ============================
+
+    return 0;
 }
 
 Wenet::Wenet(const char* modeldir,const char* modelid){
@@ -60,8 +183,8 @@ Wenet::~Wenet(){
 }
 
 //int Wenet::nextwav(const char* wavfile,JMat** pmat){
-int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
-
+int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache){
+/*
     int     m_pcmsample = 0;
     JBuf   *m_pcmbuf = nullptr;
     JMat   *m_wavmat = nullptr;
@@ -72,17 +195,12 @@ int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
     unsigned int data_length;
     void* fhnd = wav_read_open(wavfile);
     if(!fhnd)return -1;
-
     int res = wav_get_header(fhnd, &format, &channels, &sr, &bits_per_sample, &data_length);
-    if(duration>0)
-    {
-        data_length=duration*(channels *bits_per_sample*sr/8);
-    }
     if(data_length<1) {
         wav_read_close(fhnd);
         return -2;
     }
-    LOGD("data len %d\n",data_length);
+    LOGE("data len %d\n",data_length);
     m_pcmbuf = new JBuf(data_length);
     int rst = wav_read_data(fhnd,(unsigned char*)m_pcmbuf->data(),data_length);
     wav_read_close(fhnd);
@@ -101,9 +219,6 @@ int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
     int melsize = seca*MFCC_MELBASE+mellast;
     int bnfsize = seca*MFCC_BNFBASE+bnflast;
 
-    //printf("===seca %d \n",seca);
-    //getchar();
-    //printf("===wavsample %d \n",wavsample);
     int calcsize = seca+1;
 
     m_wavmat = new JMat(MFCC_WAVCHUNK,calcsize,1);
@@ -120,7 +235,6 @@ int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
     //m_bnfmat->zeros();
     //
     //printf("===seca %d secb %d mellast %d\n",seca,secb,mellast);
-    //getchar();
     //m_bnfmat = new JMat(
     calcmfcc(m_wavmat,m_melmat);
     float* mel = m_melmat->fdata();
@@ -132,7 +246,9 @@ int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
         //bnf+=MFCC_BNFBASE*MFCC_BNFCHUNK;
     }
     if(mellast){
-        int inxsec = seca?(seca+1):0;
+        //fix last
+        int inxsec = seca ;//seca?(seca+1):0;
+        printf("===indexsec %d\n",inxsec);
         float* bnf = bnfcache->secBuf(inxsec)->fdata();
         calcbnf(mel,mellast,bnf,bnflast);
         //dumpfloat(bnf,10);
@@ -155,12 +271,14 @@ int Wenet::nextwav(const char* wavfile,MBnfCache* bnfcache,float duration){
         float* bnf = m_bnfmat->frow(k);
         printf("==%d =bnf %f\n",k,*bnf);
     }
-    */
-    //*pmat = m_bnfmat;
+
+    pmat = m_bnfmat;
     delete m_pcmbuf;
     delete m_wavmat;
     delete m_melmat ;
     return bnfblock;
+    */
+    return 0;
 }
 
 float* Wenet::nextbnf(JMat* bnfmat,int index){

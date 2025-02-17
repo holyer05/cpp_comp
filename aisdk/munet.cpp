@@ -1,5 +1,5 @@
 #include "munet.h"
-#include "ncnn/ncnn/cpu.h"
+#include "cpu.h"
 #include "face_utils.h"
 #include "blendgram.h"
 
@@ -21,9 +21,9 @@ int Mobunet::initModel(const char* binfn,const char* paramfn,const char* mskfn){
     unet.clear();
     //ncnn::set_cpu_powersave(2);
     //ncnn::set_omp_num_threads(ncnn::get_big_cpu_count());
-    unet.opt = ncnn::Option();
+    //unet.opt = ncnn::Option();
     //unet.opt.use_vulkan_compute = true;
-    unet.opt.num_threads =1;// ncnn::get_big_cpu_count();
+    unet.opt.num_threads = ncnn::get_big_cpu_count();
     //unet.load_param("model/mobileunet_v5_wenet_sim.param");
     //unet.load_model("model/mobileunet_v5_wenet_sim.bin");
     unet.load_param(paramfn);
@@ -91,9 +91,9 @@ int Mobunet::domodel(JMat* pic,JMat* msk,JMat* feat){
     //JMat  picreal(160,160,3,0,1);
     //cv::cvtColor(pic->cvmat(),picreal.cvmat(),cv::COLOR_RGB2BGR);
     //cv::cvtColor(msk->cvmat(),picmask.cvmat(),cv::COLOR_RGB2BGR);
-    ncnn::Mat inmask = ncnn::Mat::from_pixels(msk->udata(), ncnn::Mat::PIXEL_BGR2RGB, 160, 160);
+    ncnn::Mat inmask = ncnn::Mat::from_pixels(msk->udata(), ncnn::Mat::PIXEL_BGR, 160, 160);
     inmask.substract_mean_normalize(mean_vals, norm_vals);
-    ncnn::Mat inreal = ncnn::Mat::from_pixels(pic->udata(), ncnn::Mat::PIXEL_BGR2RGB, 160, 160);
+    ncnn::Mat inreal = ncnn::Mat::from_pixels(pic->udata(), ncnn::Mat::PIXEL_BGR, 160, 160);
     inreal.substract_mean_normalize(mean_vals, norm_vals);
     //
     //JMat  picin(160*160,6);
@@ -117,7 +117,7 @@ int Mobunet::domodel(JMat* pic,JMat* msk,JMat* feat){
         pr += inreal.cstep;
     }
     */
-    buf+= inpic.cstep*inreal.c;
+    buf+= inreal.cstep*inreal.c;
     float* pm = (float*)inmask.data;
     //printf("=%d===%f\n",msk->udata()[2],*pm);
     memcpy(buf,pm,inmask.cstep*sizeof(float)*inmask.c);
@@ -128,34 +128,118 @@ int Mobunet::domodel(JMat* pic,JMat* msk,JMat* feat){
         pm += inmask.cstep;
     }
     */
+/*    for (size_t c = 1; c <= 6; c++) {
+        std::ofstream csv_file("/data/data/ai.guiji.duix.test/inpic_" + std::to_string(c) + ".csv");
+        float* start = reinterpret_cast<float*>(inpic.data) + (c - 1)*160*160;
+        for (size_t i = 0; i < 160; i++) {
+             for (size_t j = 0; j < 160; j++) {
+                if (j > 0) {
+                    csv_file << ",";
+                     }
+                csv_file << *(start + i * 160 + j);
+                 }
+            csv_file << std::endl;
+        }
+    }*/
+    //memset(feat->data(),0,512*256*sizeof(float));
 
-    ncnn::Mat inwenet(256,20,1,feat->data());
+
+
+
+    ncnn::Mat inwenet(32,16,256,feat->data());
+
+
+
+/*    std::ofstream csv_file("/data/data/ai.guiji.duix.test/inwenet.csv");
+    for (size_t c = 0; c <256; c++) {
+        auto start = reinterpret_cast<float*>(inwenet.data) + c *32*16;
+        for (size_t i = 0; i < 32*16; i++) {
+            csv_file << static_cast<float>(*(start + i));
+            csv_file << ",";
+            }
+            csv_file << std::endl;
+        }*/
     //ncnn::Mat inwenet(20,256,1,feat->data());
-    ncnn::Mat outpic;
-    
+    ncnn::Mat outpic(160,160,3);
     ncnn::Extractor ex = unet.create_extractor();
+    ex.input("in0", inpic);
+    ex.input("in1", inwenet);
+    ex.extract("out0", outpic);
+/*    float outmean_vals[3] = {-1.0f, -1.0f, -1.0f};
+    float outnorm_vals[3] = { 127.5f,  127.5f,  127.5f};*/
 
-    ex.set_num_threads(1);
-    ex.input("face", inpic);
-    ex.input("audio", inwenet);
-    ex.extract("output", outpic);
+/*    for (size_t c = 1; c <= 3; c++) {
+        std::ofstream csv_file("/data/data/ai.guiji.duix.test/outpic_" + std::to_string(c) + ".csv");
+        auto start = reinterpret_cast<float*>(outpic.data) + (c - 1)*160*160;
+        for (size_t i = 0; i < 160; i++) {
+            for (size_t j = 0; j < 160; j++) {
+                if (j > 0) {
+                    csv_file << ",";
+                }
+                csv_file << static_cast<float>(*(start + i * 160 + j));
+            }
+            csv_file << std::endl;
+        }
+    }*/
 
-    float outmean_vals[3] = {-1.0f, -1.0f, -1.0f};
-    float outnorm_vals[3] = { 127.5f,  127.5f,  127.5f};
+
+    float outmean_vals[3] = {0, 0, 0};
+    float outnorm_vals[3] =  {255.0f, 255.0f, 255.0f};
     outpic.substract_mean_normalize(outmean_vals, outnorm_vals);
-    cv::Mat cvout(160,160,CV_8UC3);
-    outpic.to_pixels(cvout.data,ncnn::Mat::PIXEL_RGB2BGR);
-    BlendGramAlpha((uchar*)cvout.data,(uchar*)mat_weights->data(),(uchar*)pic->data(),160,160);
-    
-//    ex.clear();
-//    inmask.release();
-//    inreal.release();
-//    inpic.release();
-//    buf=nullptr;
-//    pr=nullptr;
-//    pm=nullptr;
-//    inwenet.release();
-//    outpic.release();
+//    cv::Mat cvout(160,160,CV_8UC3);
+
+/*    for (size_t c = 1; c <= 3; c++) {
+        std::ofstream csv_file("/data/data/ai.guiji.duix.test/outpic_" + std::to_string(c) + ".csv");
+        auto start = reinterpret_cast<float*>(outpic.data) + (c - 1)*160*160;
+        for (size_t i = 0; i < 160; i++) {
+            for (size_t j = 0; j < 160; j++) {
+                if (j > 0) {
+                    csv_file << ",";
+                }
+                csv_file << static_cast<float>(*(start + i * 160 + j));
+            }
+            csv_file << std::endl;
+        }
+    }*/
+    //outpic.to_pixels(cvout.data,ncnn::Mat::PIXEL_BGR);
+
+    //memset((uchar*)pic->data(),128,160*160*3*sizeof(uchar));
+    //outpic.to_pixels(pic->udata(),ncnn::Mat::PIXEL_BGR);
+    uchar out_temp[160][160][3];
+    for (size_t c = 0; c < 3; c++) {
+        auto start = reinterpret_cast<float*>(outpic.data) + c * 160 * 160;
+        for (size_t i = 0; i < 160; i++) {
+            for (size_t j = 0; j < 160; j++) {
+                out_temp[i][j][c] = static_cast<uchar>(*(start + i * 160 + j));
+            }
+        }
+    }
+    /*    for (size_t c = 0; c < 3; c++) {
+        auto start = reinterpret_cast<float*>(outpic.data) + c * 160 * 160;
+        for (size_t i = 0; i < 160; i++) {
+            for (size_t j = 0; j < 160; j++) {
+                reinterpret_cast<uchar*>(pic->data())[i * 160 * 3 + j * 3 + c] =
+                    static_cast<uchar>(*(start + i * 160 + j));
+            }
+        }
+    }*/
+
+
+
+/*    for (size_t c = 1; c <= 3; c++) {
+        std::ofstream csv_file("/data/data/ai.guiji.duix.test/pic_" + std::to_string(c) + ".csv");
+        auto start = reinterpret_cast<uchar*>(pic->data()) + (c - 1);
+        for (size_t i = 0; i < 160; i++) {
+            for (size_t j = 0; j < 160; j++) {
+                if (j > 0) {
+                    csv_file << ",";
+                }
+                csv_file << static_cast<int>(*(start + i * 160 * 3+ j * 3));
+            }
+            csv_file << std::endl;
+        }
+    }*/
+    BlendGramAlpha(reinterpret_cast<uchar*>(out_temp),(uchar*)mat_weights->data(),(uchar*)pic->data(),160,160);
     //pic->tojpg("fff.bmp");
     //getchar();
     /*

@@ -1,93 +1,77 @@
-#include "wavcache.h"
 #include "aicommon.h"
+#include "wavcache.h"
 
-
-JMat* MBufCache::secBuf(int sec){
-    JMat* mat = NULL;
+JMat* MBufCache::secBuf(int sec) {
+    sec += m_start_padding;
+    JMat* result = NULL;
     m_lock->lock();
-    if(sec<vec_buf.size()){
-        mat = vec_buf[sec];
-    }else{
-        mat = new JMat(m_secw,m_sech+1,1);
-        vec_buf.push_back(mat);
+    if (sec < m_blocks.size()) {
+        result = m_blocks[sec];
+    }
+    else {
+        result = new JMat(m_block_width, m_block_height, 1);
+        m_blocks.push_back(result);
     }
     m_lock->unlock();
-    return mat;
-}
-void MBufCache::debug(){
-
+    return result;
 }
 
-JMat* MBufCache::inxBuf(int inx){
-    int seca = inx/m_sech;
-    int secb = inx%m_sech;
-    JMat* mat = NULL;
-    if(secb>=m_lineh){
-        mat= new JMat(m_secw,m_blockh,1);
-        JMat* sa = secBuf(seca);
-        int la = m_sech-secb;
-        int parta = la*m_secw;
-        float* pa = mat->fdata();
-        memcpy(pa,sa->frow(secb),parta*sizeof(float));
-        JMat* sb = secBuf(seca+1);
-        int lb = m_blockh - la;
-        float* pb = pa+parta;
-        int partb = lb*m_secw;
-        memcpy(pb,sa->frow(0),partb*sizeof(float));
-    }else{
-        JMat* src = secBuf(seca);
-        float* buf = src->frow(secb);
-        //printf("==dist %d\n",(buf-src->fdata())*4);
-        mat = new JMat(m_secw,m_blockh,buf,1);
-        //printf("==size %d %d =  %d\n",m_secw,m_blockh,m_secw*m_blockh*4);
+JMat* MBufCache::inxBuf(int index) {
+    JMat* result = new JMat(m_block_width, m_block_height * m_block_range, 1);
+    float* dst = result->fdata();
+    const int block_size = m_block_width * m_block_height;
+    const size_t block_memory_size = block_size * sizeof(float);
+    const int end_index = std::min<int>(index + m_block_range, m_blocks.size());
+    for (int i = index; i < end_index; i++) {
+        memcpy(dst, m_blocks[i]->fdata(), block_memory_size);
+        dst += block_size;
     }
-    return mat;
+    return result;
 }
 
-int*    MBufCache::tagarr(){
+int* MBufCache::tagarr() {
     return m_tagarr;
 }
 
-MBufCache::MBufCache(int initsec,int secw,int sech,int blockh){
+MBufCache::MBufCache(int block_width, int block_height, int start_padding, int block_range) {
     m_lock = new std::mutex();
-    m_secw = secw;
-    m_sech = sech;
-    m_blockh = blockh;
-    m_lineh = sech-blockh;
-    for(int k=0;k<initsec;k++){
-        JMat* mat = new JMat(m_secw,m_sech+1,1);
-        vec_buf.push_back(mat);
+    m_block_width = block_width;
+    m_block_height = block_height;
+    m_block_range = block_range;
+    m_start_padding = start_padding;
+    const size_t block_memory_size = block_width * block_height;
+    for (int i = 0; i < start_padding; i++) {
+        JMat* block = new JMat(m_block_width, m_block_height, 1);
+        memset(block->fdata(), 0, block_memory_size * sizeof(float));
+        m_blocks.push_back(block);
     }
-    memset(m_tagarr,0,512*sizeof(int));
+    memset(m_tagarr, 0, 512 * sizeof(int));
 }
 
-MBufCache::~MBufCache(){
+MBufCache::~MBufCache() {
     m_lock->lock();
-    for(int k=0;k<vec_buf.size();k++){
-        JMat* mat = vec_buf[k];
-        delete mat;
+    for (auto block : m_blocks) {
+        delete block;
     }
-    vec_buf.clear();
+    m_blocks.clear();
     m_lock->unlock();
     delete m_lock;
 }
 
-#include "aicommon.h"
-
-MBnfCache::MBnfCache():MBufCache(3,MFCC_BNFCHUNK,MFCC_BNFBASE,20){
+MBnfCache::MBnfCache() : MBufCache(MFCC_BNFCHUNK, MFCC_BNFBASE, 8, 16) {
 }
 
-MBnfCache::~MBnfCache(){
+MBnfCache::~MBnfCache() {
 }
 
 #ifdef _WAVTEST_
-int main(int argc,char** argv){
+int main(int argc, char** argv) {
     MBnfCache cache;
-    for(int k=0;k<100;k++){
+    for (int k = 0; k < 100; k++) {
         JMat* mat = cache.secBuf(k);
     }
-    for(int k=816;k<817;k++){
-        printf("#%d# \n",k);
+    for (int k = 816; k < 817; k++) {
+        printf("#%d# \n", k);
         JMat* mat = cache.inxBuf(k);
         JMat cm = mat->clone();
         delete mat;

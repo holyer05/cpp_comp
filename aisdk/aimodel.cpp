@@ -156,6 +156,7 @@ OnnxModel::~OnnxModel(){
 int OnnxModel::doInitModel(){
     env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, "ONNX");
     sessionOptions = Ort::SessionOptions();
+    //sessionOptions.AddConfigEntry("session.load_model_format","ORT");
     //std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
     //auto cudaAvailable = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
     //OrtCUDAProviderOptions cudaOption;
@@ -166,14 +167,6 @@ int OnnxModel::doInitModel(){
     //}else{
         //std::cout << "Inference device: CPU" << std::endl;
     //}
-    sessionOptions.SetIntraOpNumThreads(1);
-    sessionOptions.SetInterOpNumThreads(1);
-
-    
-//    sessionOptions.AddConfigEntry("session.load_model_format", "ORT");
-    sessionOptions.AddConfigEntry("session.disable_prepacking", "1");
- 
-  //  sessionOptions.AddConfigEntry("session.use_ort_model_bytes_directly", "1");
 
     session = Ort::Session(env, m_modelPath.c_str(), sessionOptions);
     //Ort::AllocatorWithDefaultOptions allocator;
@@ -231,35 +224,63 @@ int OnnxModel::doInitModel(){
     return 0;
 }
 
+size_t OnnxModel::getElementSize(int kind) const {
+    switch (kind) {
+        case 1:
+            return sizeof(float);
+        case 7:
+            return sizeof(int64_t);
+            // Add cases for other types as needed
+    }
+}
 
 int OnnxModel::doRunModel(void** arrin,void** arrout,void* stream,AiCfg* pcfg){
-    AiCfg* cfg = pcfg==nullptr?m_cfg:pcfg;
+    AiCfg* cfg = pcfg == nullptr ? m_cfg : pcfg;
     int incnt = cfg->size_inputs.size();
     int outcnt = cfg->size_outputs.size();
-    std::cout<<"run onnx:"<<outcnt<<std::endl;
-    if(!arrin || !arrout)return -1;
+    if (!arrin || !arrout || incnt != cfg->shape_inputs.size() || outcnt != cfg->shape_outputs.size()) {
+        std::cerr << "Invalid input or output arrays." << std::endl;
+        return -1;
+    }
+    // Prepare input tensors
+    Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
     std::vector<Ort::Value> inputTensors;
-    Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu( OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-    for(int k=0;k<incnt;k++){
-        inputTensors.push_back(Ort::Value::CreateTensor( memoryInfo, arrin[k] ,cfg->size_inputs[k]*4 , cfg->shape_inputs[k].data(), cfg->shape_inputs[k].size(), (ONNXTensorElementDataType)cfg->kind_inputs[k] ));
+    for (int k = 0; k < incnt; ++k) {
+        inputTensors.push_back(
+                Ort::Value::CreateTensor(memoryInfo,
+                                         static_cast<uint8_t*>(arrin[k]), // Cast to uint8_t*
+                                         cfg->size_inputs[k] * getElementSize(cfg->kind_inputs[k]),
+                                         cfg->shape_inputs[k].data(),
+                                         cfg->shape_inputs[k].size(),
+                                         static_cast<ONNXTensorElementDataType>(cfg->kind_inputs[k]))
+        );
     }
+    // Prepare output tensors
     std::vector<Ort::Value> outputTensors;
-    for(int k=0;k<outcnt;k++){
-        outputTensors.push_back(Ort::Value::CreateTensor( memoryInfo, arrout[k] ,cfg->size_outputs[k]*4 , cfg->shape_outputs[k].data(), cfg->shape_outputs[k].size(),(ONNXTensorElementDataType)cfg->kind_outputs[k] ));
+    for (int k = 0; k < outcnt; ++k) {
+        outputTensors.push_back(
+                Ort::Value::CreateTensor(memoryInfo,
+                                         static_cast<uint8_t*>(arrout[k]), // Cast to uint8_t*
+                                         cfg->size_outputs[k] * getElementSize(cfg->kind_outputs[k]),
+                                         cfg->shape_outputs[k].data(),
+                                         cfg->shape_outputs[k].size(),
+                                         static_cast<ONNXTensorElementDataType>(cfg->kind_outputs[k]))
+        );
     }
-    this->session.Run(Ort::RunOptions{nullptr}, cfg->names_in, inputTensors.data(), incnt, cfg->names_out, outputTensors.data(),outcnt);
-    if(1)return 0;
-    /*
-    //for(int k=0;k<9;k++)dumpfloat((float*)arrout[k],10);//size_outputs[0]);
-    std::vector<Ort::Value> aoutputTensors = this->session.Run(Ort::RunOptions{nullptr}, name_inputs.data(), inputTensors.data(),     1, name_outputs.data(), 9);
-    //bool* pmsk = (bool*)aoutputTensors[1].GetTensorData<bool>();
-    for(int k=0;k<9;k++){
-    float* pbnf = (float*)aoutputTensors[0].GetTensorData<float>();
-    memcpy(arrout[k],pbnf,size_outputs[k]*4);
-    }
-    */
-    return 0;
+
+
+        // Run the model
+        this->session.Run(Ort::RunOptions{nullptr},
+                          cfg->names_in, inputTensors.data(), incnt,
+                          cfg->names_out, outputTensors.data(), outcnt);
+
+        // Check if the session.Run was successful
+        return 0;
 }
+
+
+
+
 
 NcnnModel::NcnnModel():AiModel(){
 }

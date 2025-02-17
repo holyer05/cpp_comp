@@ -7,9 +7,9 @@
 #include "sas_util.h"
 
 int nSamplesPerSec = 16000;                     //采样率(每秒样本数) //Sample rate.(keda, thchs30, aishell)
-int length_DFT = 1024;//2048;                          //傅里叶点数 //fft points (samples)
+int length_DFT = 512;//2048;                          //傅里叶点数 //fft points (samples)
 int hop_length = 160;//int(0.05 * nSamplesPerSec);    //步长 //下一帧取数据相对于这一帧的右偏移量
-int win_length = 800;// int(0.1 * nSamplesPerSec);     //帧长 //假设16000采样率，则取取0.1s时间的数据
+int win_length = 400;// int(0.1 * nSamplesPerSec);     //帧长 //假设16000采样率，则取取0.1s时间的数据
 int number_filterbanks = 80;                    //过滤器数量 //Number of Mel banks to generate
 float preemphasis = 0.97;                       //预加重（高通滤波器比例值）
 int max_db = 100;
@@ -275,18 +275,18 @@ int log_mel(float* ifile_data, int ifile_length,int nSamples_per_sec,float* ofil
     // 使用opencv来实现
     //cv::log(cv::max(cv_mel, 1e-5), cv_mel);
 
-    //cv::log(cv::max(cv_mel, 1e-5), cv_mel);
-    cv::log(cv_mel+ 1e-5, cv_mel);
+    cv::log(cv::max(cv_mel, 1e-17), cv_mel);
+    cv_mel+=23;
+    //cv::log(cv_mel+ 1e-5, cv_mel);
     // opencv没有log10()，所以使用log(x)/log(10)来运算。
-    cv_mel = cv_mel / 2.3025850929940459 * 10; // 2.3025850929940459=log(10)
-
+    //cv_mel = cv_mel / 2.3025850929940459 * 10; // 2.3025850929940459=log(10)
     // normalize
     //mel = np.clip((mel - hp.ref_db + hp.max_db) / hp.max_db, 1e-8, 1)
     //mag = np.clip((mag - hp.ref_db + hp.max_db) / hp.max_db, 1e-8, 1)
     //cv::normalize(cv_mel, cv_mel, 1e-8, 1.0, cv::NORM_MINMAX); // cv::normalize无法实现
     //cv_mel = (cv_mel - ref_db + max_db) / max_db;
     //cv_mel = cv::max(cv::min(cv_mel, 1.0), 1e-8);
-    cv_mel = cv_mel - ref_db;
+    //cv_mel = cv_mel - ref_db;
     //cv::print(cv_mel);
     //std::cout<<cv_mel.cols<<"=====cv_mel"<<cv_mel.rows<<std::endl;
     //std::cout<<"=====cv_mel"<<std::endl;
@@ -312,6 +312,41 @@ int log_mel(float* ifile_data, int ifile_length,int nSamples_per_sec,float* ofil
     // 返回mel特征向量
     return 0;
 }
+
+int fbank(float* ifile_data, int ifile_length, int nSamples_per_sec, float* ofile_data) {
+    if (nSamples_per_sec != nSamplesPerSec) {
+        return -1;
+    }
+
+    // pre-emphasis 预加重 //高通滤波
+    cv::Mat_<float> d1(1, ifile_length - 1, (float *) (ifile_data) + 1);
+    cv::Mat_<float> d2(1, ifile_length-1 , (float *) (ifile_data));
+    cv::Mat_<float> cv_emphasis_data;
+    cv::hconcat(cv::Mat_<float>::zeros(1, 1), d1 - d2 * preemphasis, cv_emphasis_data);
+
+    // magnitude spectrogram 幅度谱图
+    auto mag = MagnitudeSpectrogram(&cv_emphasis_data, length_DFT, hop_length, win_length);
+    cv::pow(cv::abs(mag), 2, mag); // Compute power spectrogram
+
+    // 如果mel_basis还没有初始化，则创建它
+    if (mel_basis.empty()) {
+        mel_basis = mel_spectrogram_create(nSamplesPerSec, length_DFT, number_filterbanks);
+    }
+
+    // 生成FBank特征
+    cv::Mat cv_fbank = mel_basis * mag;
+
+    // Transpose
+    cv::Mat cv_fbank_r;
+    cv::transpose(cv_fbank, cv_fbank_r);
+
+    // 将结果复制到输出缓冲区中
+    cv::Mat rrr(cv_fbank.cols, cv_fbank.rows, CV_32FC1, ofile_data);
+    cv_fbank_r.convertTo(rrr, CV_32FC1);
+
+    return 0;
+}
+
 
 /**--------------------------------- 以下是pcen运算方法 ---------------------------------**/
 

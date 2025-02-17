@@ -1,6 +1,6 @@
 #pragma once
 #include "jmat.h"
-#include "ncnn/ncnn/net.h"
+#include "net.h"
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -11,8 +11,10 @@
 class Mobunet{
     private:
         ncnn::Net unet;
-        float mean_vals[3] = {127.5f, 127.5f, 127.5f};
-        float norm_vals[3] = {1 / 127.5f, 1 / 127.5f, 1 / 127.5f};
+/*        float mean_vals[3] = {127.5f, 127.5f, 127.5f};
+        float norm_vals[3] = {1 / 127.5f, 1 / 127.5f, 1 / 127.5f};*/
+        float mean_vals[3] = {0, 0, 0};
+        float norm_vals[3] = {1 / 255.0f, 1 / 255.0f, 1 / 255.0f};
         JMat*   mat_weights = nullptr;
         int initModel(const char* binfn,const char* paramfn,const char* mskfn);
     public:
